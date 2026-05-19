@@ -1,4 +1,10 @@
-import { severityOrder, type RiskSeverity, type ToolAction, type ToolDefinition, type ToolRisk } from "./types";
+import {
+  severityOrder,
+  type RiskSeverity,
+  type ToolAction,
+  type ToolDefinition,
+  type ToolRisk
+} from "./types";
 
 interface KeywordGroup {
   action: ToolAction;
@@ -15,12 +21,35 @@ const keywordGroups: KeywordGroup[] = [
   {
     action: "write",
     severity: "high",
-    keywords: ["write", "create", "update", "commit", "pull_request", "merge", "upload", "save"]
+    keywords: [
+      "write",
+      "create",
+      "update",
+      "commit",
+      "pull_request",
+      "pull request",
+      "merge",
+      "upload",
+      "save"
+    ]
   },
   {
     action: "send",
     severity: "high",
-    keywords: ["send", "post", "publish", "email", "message", "webhook", "slack", "notify", "external_url"]
+    keywords: [
+      "send",
+      "send email",
+      "post",
+      "post message",
+      "publish",
+      "publish message",
+      "webhook",
+      "notify",
+      "external url",
+      "external_url",
+      "recipient",
+      "recipients"
+    ]
   },
   {
     action: "delete",
@@ -59,6 +88,12 @@ const keywordGroups: KeywordGroup[] = [
   }
 ];
 
+const schemaKeywordGroups: KeywordGroup[] = keywordGroups.map((group) =>
+  group.action === "browser"
+    ? { ...group, keywords: group.keywords.filter((keyword) => keyword !== "page") }
+    : group
+);
+
 function normalize(input: string): string {
   return input
     .toLowerCase()
@@ -82,23 +117,11 @@ function severityRank(severity: RiskSeverity): number {
 export function classifyTool(tool: ToolDefinition | string, description = ""): ToolRisk {
   const name = typeof tool === "string" ? tool : tool.name;
   const toolDescription = typeof tool === "string" ? description : (tool.description ?? "");
-  const normalizedText = normalize(`${name} ${toolDescription}`);
-  let best: { group: KeywordGroup; matched: string[]; longest: number } | undefined;
-
-  for (const group of keywordGroups) {
-    const matched = group.keywords.filter((keyword) => hasPhrase(normalizedText, keyword));
-    if (matched.length === 0) continue;
-    const longest = Math.max(...matched.map((keyword) => normalize(keyword).length));
-    if (!best) {
-      best = { group, matched, longest };
-      continue;
-    }
-
-    const severityDelta = severityRank(group.severity) - severityRank(best.group.severity);
-    if (severityDelta > 0 || (severityDelta === 0 && longest > best.longest)) {
-      best = { group, matched, longest };
-    }
-  }
+  const inputSchema = typeof tool === "string" ? "" : (JSON.stringify(tool.inputSchema ?? {}) ?? "");
+  const best = chooseBestMatch([
+    findBestMatch(normalize(`${name} ${toolDescription}`), keywordGroups),
+    findBestMatch(normalize(inputSchema), schemaKeywordGroups)
+  ]);
 
   if (!best) {
     return {
@@ -113,6 +136,49 @@ export function classifyTool(tool: ToolDefinition | string, description = ""): T
     severity: best.group.severity,
     matched_keywords: best.matched
   };
+}
+
+function findBestMatch(
+  normalizedText: string,
+  groups: KeywordGroup[]
+): { group: KeywordGroup; matched: string[]; longest: number } | undefined {
+  let best: { group: KeywordGroup; matched: string[]; longest: number } | undefined;
+
+  for (const group of groups) {
+    const matched = group.keywords.filter((keyword) => hasPhrase(normalizedText, keyword));
+    if (matched.length === 0) continue;
+    const longest = Math.max(...matched.map((keyword) => normalize(keyword).length));
+    if (!best) {
+      best = { group, matched, longest };
+      continue;
+    }
+
+    const severityDelta = severityRank(group.severity) - severityRank(best.group.severity);
+    if (severityDelta > 0 || (severityDelta === 0 && longest > best.longest)) {
+      best = { group, matched, longest };
+    }
+  }
+
+  return best;
+}
+
+function chooseBestMatch(
+  matches: Array<{ group: KeywordGroup; matched: string[]; longest: number } | undefined>
+): { group: KeywordGroup; matched: string[]; longest: number } | undefined {
+  return matches.reduce<{ group: KeywordGroup; matched: string[]; longest: number } | undefined>(
+    (best, match) => {
+      if (!match) return best;
+      if (!best) return match;
+
+      const severityDelta = severityRank(match.group.severity) - severityRank(best.group.severity);
+      if (severityDelta > 0 || (severityDelta === 0 && match.longest > best.longest)) {
+        return match;
+      }
+
+      return best;
+    },
+    undefined
+  );
 }
 
 export function severityAtLeast(severity: RiskSeverity, threshold: RiskSeverity): boolean {

@@ -37,6 +37,7 @@ export interface ToolRisk {
 
 export interface PolicyConfig {
   default: PolicyAction;
+  tainted_block_threshold: RiskSeverity;
   tools: Record<string, PolicyAction>;
 }
 
@@ -79,7 +80,10 @@ export interface PolicyDecision {
   reason: string;
 }
 
-export interface TraceEvent {
+export type ExpectedDecision = "allowed" | "blocked";
+
+export interface TraceToolCallEvent {
+  type?: "tool_call";
   tool: string;
   arguments: unknown;
   risk: ToolRisk;
@@ -91,14 +95,33 @@ export interface TraceEvent {
   reason: string;
   evidence?: string;
   result_hash: string | null;
+  tool_schema_hash?: string;
+  expected_decision?: ExpectedDecision;
 }
+
+export interface TraceInventoryEvent {
+  type: "inventory_changed";
+  reason: "tools/list" | "tools/list_changed";
+  at: string;
+  inventory_complete: boolean;
+  nextCursor?: string;
+}
+
+export type TraceEvent = TraceToolCallEvent | TraceInventoryEvent;
 
 export interface TraceFile {
   trace_id: string;
   schema_version: "1.0";
   project: string;
+  agentgate_version?: string;
+  policy_hash?: string;
+  tool_inventory_hash?: string;
+  server?: string;
+  mcp_protocol_version?: string;
   started_at: string;
   ended_at: string | null;
-  inventory?: Array<ToolDefinition & { risk: ToolRisk }>;
+  inventory_complete?: boolean;
+  inventory_next_cursor?: string;
+  inventory?: Array<ToolDefinition & { risk: ToolRisk; schema_hash?: string }>;
   events: TraceEvent[];
 }

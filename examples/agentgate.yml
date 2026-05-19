@@ -4,6 +4,7 @@ untrusted_tools:
   - github.read_*
 policy:
   default: block_when_tainted
+  tainted_block_threshold: medium
   tools:
     github.create_*: block_when_tainted
     github.write_*: block_when_tainted

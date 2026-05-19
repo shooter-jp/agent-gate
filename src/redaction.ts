@@ -45,7 +45,11 @@ function sortValue(value: unknown): unknown {
 
 export function hashResult(value: unknown): string {
   const redacted = redactValue(value);
-  const digest = createHash("sha256").update(canonicalJson(redacted)).digest("hex");
+  return hashCanonicalValue(redacted);
+}
+
+export function hashCanonicalValue(value: unknown): string {
+  const digest = createHash("sha256").update(canonicalJson(value)).digest("hex");
   return `sha256:${digest}`;
 }
 

@@ -2,9 +2,10 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
-import { policyActions, type AgentGateConfig, type LoadedConfig } from "./types";
+import { policyActions, severityOrder, type AgentGateConfig, type LoadedConfig } from "./types";
 
 const PolicyActionSchema = z.enum(policyActions);
+const RiskSeveritySchema = z.enum(severityOrder);
 
 const ServerConfigSchema = z.object({
   command: z.string().min(1),
@@ -20,6 +21,7 @@ const RawConfigSchema = z.object({
   policy: z
     .object({
       default: PolicyActionSchema.optional(),
+      tainted_block_threshold: RiskSeveritySchema.optional(),
       tools: z.record(z.string(), PolicyActionSchema).optional()
     })
     .optional(),
@@ -33,6 +35,7 @@ export const defaultConfig: AgentGateConfig = {
   untrusted_tools: [],
   policy: {
     default: "block_when_tainted",
+    tainted_block_threshold: "medium",
     tools: {}
   },
   servers: {},
@@ -45,6 +48,7 @@ export const exampleConfig: AgentGateConfig = {
   untrusted_tools: ["github.read_*"],
   policy: {
     default: "block_when_tainted",
+    tainted_block_threshold: "medium",
     tools: {
       "github.create_*": "block_when_tainted",
       "github.write_*": "block_when_tainted"
@@ -59,7 +63,10 @@ export const exampleConfig: AgentGateConfig = {
   tools_fixture: "examples/tools/github-tools.json"
 };
 
-export function normalizeConfig(raw: unknown, fallbackProject = defaultConfig.project): AgentGateConfig {
+export function normalizeConfig(
+  raw: unknown,
+  fallbackProject = defaultConfig.project
+): AgentGateConfig {
   const parsed = RawConfigSchema.parse(raw ?? {});
   return {
     project: parsed.project ?? fallbackProject,
@@ -67,6 +74,8 @@ export function normalizeConfig(raw: unknown, fallbackProject = defaultConfig.pr
     untrusted_tools: parsed.untrusted_tools ?? [],
     policy: {
       default: parsed.policy?.default ?? defaultConfig.policy.default,
+      tainted_block_threshold:
+        parsed.policy?.tainted_block_threshold ?? defaultConfig.policy.tainted_block_threshold,
       tools: parsed.policy?.tools ?? {}
     },
     servers: parsed.servers ?? {},
@@ -111,7 +120,9 @@ export async function loadConfig(configPath?: string, cwd = process.cwd()): Prom
 }
 
 export function resolveRelative(baseDir: string, maybeRelativePath: string): string {
-  return path.isAbsolute(maybeRelativePath) ? maybeRelativePath : path.resolve(baseDir, maybeRelativePath);
+  return path.isAbsolute(maybeRelativePath)
+    ? maybeRelativePath
+    : path.resolve(baseDir, maybeRelativePath);
 }
 
 export function configToYaml(config: AgentGateConfig = exampleConfig): string {
