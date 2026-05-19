@@ -1,7 +1,7 @@
 {
-  "name": "agentgate",
+  "name": "@shooter-jp/agentgate",
   "version": "0.1.0",
-  "description": "The tool-call firewall for AI agents.",
+  "description": "MCP tool-call firewall for prompt-injection regression.",
   "type": "module",
   "license": "Apache-2.0",
   "repository": {
@@ -17,6 +17,8 @@
     "ai-agents",
     "agent-security",
     "prompt-injection",
+    "mcp-security",
+    "regression-testing",
     "tool-calls",
     "ai-security",
     "json-rpc"
@@ -24,8 +26,12 @@
   "bin": {
     "agentgate": "dist/cli.js"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "dist",
+    "assets",
     "README.md",
     "SECURITY.md",
     "LICENSE"
