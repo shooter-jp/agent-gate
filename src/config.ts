@@ -125,10 +125,10 @@ export function resolveRelative(baseDir: string, maybeRelativePath: string): str
     : path.resolve(baseDir, maybeRelativePath);
 }
 
-export function configToYaml(config: AgentGateConfig = exampleConfig): string {
+export function configToYaml(config: AgentGateConfig = defaultConfig): string {
   return stringifyYaml(config);
 }
 
 export async function writeDefaultConfig(targetPath: string): Promise<void> {
-  await writeFile(targetPath, configToYaml(exampleConfig), "utf8");
+  await writeFile(targetPath, configToYaml(), "utf8");
 }

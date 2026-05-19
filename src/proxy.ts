@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { constants as osConstants } from "node:os";
 import readline from "node:readline";
 import { classifyTool } from "./classifier";
 import { loadConfig, resolveRelative } from "./config";
@@ -19,6 +20,7 @@ interface JsonRpcMessage {
 
 interface PendingRequest {
   resolve: (message: JsonRpcMessage) => void;
+  reject: (error: Error) => void;
 }
 
 type InventoryTool = ToolDefinition & { risk: ToolRisk; schema_hash?: string };
@@ -65,6 +67,9 @@ export class JsonRpcProxy {
   private inventoryComplete = false;
   private trust: TrustState = createTrustState();
   private writer?: TraceWriter;
+  private finalizeWork?: Promise<void>;
+  private upstreamExited = false;
+  private shuttingDown = false;
 
   constructor(
     private readonly upstream: ChildProcessWithoutNullStreams,
@@ -90,9 +95,11 @@ export class JsonRpcProxy {
     this.upstream.stderr.on("data", (chunk) => {
       this.errorOutput.write(chunk);
     });
-    this.upstream.on("exit", async () => {
-      await this.writer?.finalize();
-      this.exit(0);
+    this.upstream.on("exit", (code, signal) => {
+      void this.handleUpstreamExit(code, signal).catch((error) => {
+        this.errorOutput.write(`AgentGate proxy error: ${(error as Error).message}\n`);
+        this.exit(1);
+      });
     });
 
     readline.createInterface({ input: this.upstream.stdout }).on("line", (line) => {
@@ -109,9 +116,31 @@ export class JsonRpcProxy {
     });
 
     await new Promise<void>((resolve) => clientReader.on("close", resolve));
+    this.shuttingDown = true;
     await this.clientWork;
-    await this.writer?.finalize();
-    this.upstream.kill();
+    await this.finalizeTrace();
+    if (!this.upstreamExited) {
+      this.upstream.kill();
+    }
+  }
+
+  private async handleUpstreamExit(
+    code: number | null,
+    signal: NodeJS.Signals | null
+  ): Promise<void> {
+    this.upstreamExited = true;
+    this.rejectPendingRequests(
+      new Error(`Upstream MCP server exited (${upstreamExitReason(code, signal)})`)
+    );
+    if (this.shuttingDown) return;
+
+    await this.finalizeTrace();
+    this.exit(upstreamExitCode(code, signal));
+  }
+
+  private async finalizeTrace(): Promise<void> {
+    this.finalizeWork ??= this.writer?.finalize() ?? Promise.resolve();
+    await this.finalizeWork;
   }
 
   private handleUpstreamLine(line: string): void {
@@ -211,8 +240,7 @@ export class JsonRpcProxy {
       : undefined;
 
     if (isNotification(request)) {
-      const reason =
-        "tools/call notifications are blocked because their results cannot be audited";
+      const reason = "tools/call notifications are blocked because their results cannot be audited";
       await this.writer?.record({
         type: "tool_call",
         request_kind: "notification",
@@ -245,6 +273,7 @@ export class JsonRpcProxy {
     if (!decision.allowed) {
       await this.writer?.record({
         type: "tool_call",
+        request_kind: "request",
         tool,
         arguments: args,
         risk,
@@ -273,6 +302,7 @@ export class JsonRpcProxy {
     this.trust = trustUpdate.after;
     await this.writer?.record({
       type: "tool_call",
+      request_kind: "request",
       tool,
       arguments: args,
       risk,
@@ -288,6 +318,10 @@ export class JsonRpcProxy {
   }
 
   private forward(request: JsonRpcMessage): Promise<JsonRpcMessage | undefined> {
+    if (this.upstreamExited) {
+      return Promise.reject(new Error("Upstream MCP server has exited"));
+    }
+
     const id = request.id;
     if (id === undefined) {
       this.upstream.stdin.write(`${JSON.stringify(request)}\n`);
@@ -295,15 +329,36 @@ export class JsonRpcProxy {
     }
 
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve });
+      const onError = (error: Error) => {
+        this.pending.delete(id);
+        reject(error);
+      };
+      this.pending.set(id, {
+        resolve: (message) => {
+          this.upstream.off("error", onError);
+          resolve(message);
+        },
+        reject: (error) => {
+          this.upstream.off("error", onError);
+          reject(error);
+        }
+      });
       this.upstream.stdin.write(`${JSON.stringify(request)}\n`);
-      this.upstream.once("error", reject);
+      this.upstream.once("error", onError);
     });
   }
 
   private writeClient(message: JsonRpcMessage | undefined): void {
     if (!message) return;
     this.clientOutput.write(`${JSON.stringify(message)}\n`);
+  }
+
+  private rejectPendingRequests(error: Error): void {
+    const pendingRequests = [...this.pending.values()];
+    this.pending.clear();
+    for (const pending of pendingRequests) {
+      pending.reject(error);
+    }
   }
 }
 
@@ -352,6 +407,20 @@ function isNotification(message: JsonRpcMessage): boolean {
 
 function compareInventoryTools(a: InventoryTool, b: InventoryTool): number {
   return a.name.localeCompare(b.name);
+}
+
+function upstreamExitCode(code: number | null, signal: NodeJS.Signals | null): number {
+  if (typeof code === "number") return code;
+  if (!signal) return 1;
+
+  const signalNumber = osConstants.signals[signal];
+  return typeof signalNumber === "number" ? 128 + signalNumber : 1;
+}
+
+function upstreamExitReason(code: number | null, signal: NodeJS.Signals | null): string {
+  if (typeof code === "number") return `code ${code}`;
+  if (signal) return `signal ${signal}`;
+  return "unknown exit status";
 }
 
 export function proxyConfigSummary(config: AgentGateConfig): string {
