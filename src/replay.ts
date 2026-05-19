@@ -2,7 +2,7 @@ import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { loadConfig } from "./config";
 import { evaluatePolicy } from "./policy";
-import { hashCanonicalValue } from "./redaction";
+import { hashPolicyConfig } from "./redaction";
 import { readTraceFile } from "./trace";
 import { cloneTrustState, createTrustState } from "./trust";
 import type {
@@ -43,20 +43,27 @@ export async function replayTrace(
   config?: Awaited<ReturnType<typeof loadConfig>>["config"]
 ): Promise<ReplayResult> {
   const activeConfig = config ?? (await loadConfig()).config;
-  const currentPolicyHash = hashCanonicalValue(activeConfig.policy);
+  const currentPolicyHash = hashPolicyConfig(activeConfig);
   let trust: TrustState = createTrustState();
   const failures: string[] = [];
 
   for (const event of trace.events) {
     if (!isToolCallEvent(event)) continue;
     const trustBefore = cloneTrustState(event.trust.before ?? trust);
-    const decision = await evaluatePolicy({
-      tool: event.tool,
-      risk: event.risk,
-      trust: trustBefore,
-      config: activeConfig,
-      nonInteractive: true
-    });
+    const decision =
+      event.request_kind === "notification"
+        ? {
+            policy_action: "block" as const,
+            allowed: false,
+            reason: "tools/call notifications are blocked because their results cannot be audited"
+          }
+        : await evaluatePolicy({
+            tool: event.tool,
+            risk: event.risk,
+            trust: trustBefore,
+            config: activeConfig,
+            nonInteractive: true
+          });
     const expectedDecision = resolveExpectedDecision(event);
     const currentDecision = decision.allowed ? "allowed" : "blocked";
 
