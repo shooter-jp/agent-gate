@@ -1,36 +1,57 @@
 # AgentGate
 
-Stop untrusted content from triggering privileged tool calls.
+[![npm](https://img.shields.io/npm/v/@shooter-jp/agentgate.svg)](https://www.npmjs.com/package/@shooter-jp/agentgate)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](#requirements)
+[![ci](https://github.com/shooter-jp/agent-gate/actions/workflows/ci.yml/badge.svg)](https://github.com/shooter-jp/agent-gate/actions/workflows/ci.yml)
 
-AgentGate is the tool-call firewall for AI agents. It sits between your local agent and MCP tools, blocks write/send/delete/exec-style calls after untrusted content enters the session, records the trace, and turns that trace into a regression test.
+> A local firewall that stops MCP agents from acting on prompt-injection — and turns each block into a replayable test.
 
-AgentGate is a focused developer CLI. It is not a SaaS dashboard, database-backed security platform, telemetry product, or agent framework.
+When an agent reads a poisoned issue, PR, Slack message, doc, or web page, it can be tricked into calling privileged tools like `github.create_pull_request` or `slack.send`. AgentGate sits between your MCP client and your MCP servers, deterministically blocks risky calls once the session is tainted, and records each decision as a redacted trace you can replay in CI.
 
-## Install
+## Why AgentGate
+
+- **Deterministic enforcement outside the model.** Risk classification and taint rules run as code, not as a prompt.
+- **Replayable traces.** Every block becomes a regression test you can re-run after policy changes.
+- **Local-first.** Runs on your machine. No SaaS, no telemetry, no uploaded traces.
+- **Credential-free demo.** One command reproduces a real prompt-injection block.
+
+AgentGate is not an agent. Codex (or your MCP client) still decides what to do; AgentGate only enforces the tool-call boundary.
+
+## Who is this for
+
+- Developers running MCP tools with real privileges: **GitHub, Slack, shell, browser, email, database, payments**.
+- Agent workflows that read **untrusted content** — issues, PRs, docs, chat, web pages.
+- Teams that want **policy-as-code** and **replayable safety checks** in local dev and CI.
+
+Skip AgentGate if your agent only uses read-only tools or you manually approve every privileged action.
+
+## Requirements
+
+- Node.js **≥ 20**
+- npm or pnpm
+- *(optional)* [Codex](https://github.com/openai/codex) or any MCP-compatible client
+
+## Try it in 30 seconds
+
+The demo simulates a GitHub issue containing prompt-injection text, marks the session tainted, blocks a privileged write, and writes a redacted trace. No credentials, no real GitHub access.
+
+**From source (works today):**
 
 ```bash
-pnpm install
-pnpm build
-```
-
-After publishing, the intended install path is:
-
-```bash
-pnpm add -D agentgate
-```
-
-This MVP targets Node.js 20+ and uses a minimal line-delimited STDIO JSON-RPC proxy instead of a full MCP SDK integration.
-
-## 60-second demo
-
-```bash
+git clone https://github.com/shooter-jp/agent-gate.git
+cd agent-gate
+pnpm install && pnpm build
 node dist/cli.js demo github-injection
-node dist/cli.js replay .agentgate/traces
 ```
 
-The `agentgate demo github-injection` demo is credential-free and works anywhere. It uses an in-process simulation, with no GitHub token, network service, or configured MCP server required. It simulates a GitHub issue that contains prompt-injection text, then simulates an attempted privileged GitHub write. AgentGate marks the session tainted and blocks the write.
+**From npm (coming soon — once published):**
 
-Sample output:
+```bash
+npx -y @shooter-jp/agentgate demo github-injection
+```
+
+Expected output:
 
 ```text
 BLOCKED
@@ -44,56 +65,73 @@ policy:
     github.write_*: block_when_tainted
 ```
 
-## Use with Codex
-
-Codex supports local STDIO MCP servers. For source builds, run the following from the repository root after `pnpm build`; it uses the repo-local `examples/agentgate.yml` fixture:
+Replay the trace as a regression test:
 
 ```bash
-codex mcp add agentgate-github -- node dist/cli.js proxy \
-  --config examples/agentgate.yml \
-  --server github
+# Source checkout
+node dist/cli.js replay .agentgate/traces
+
+# npm package
+npx -y @shooter-jp/agentgate replay .agentgate/traces
 ```
 
-After npm publishing, initialize a neutral config and edit `servers` to point at your real MCP server command:
+## How it works
 
-```bash
-agentgate init
-```
+![AgentGate flow: untrusted content taints an agent session, AgentGate blocks privileged tool calls, and redacted traces can be replayed as regression tests.](assets/agentgate.png)
 
-Then register the packaged CLI with Codex:
+AgentGate runs as a local STDIO JSON-RPC proxy between an MCP client and an MCP server. The loop has four steps:
 
-```bash
-codex mcp add agentgate-github -- npx -y agentgate proxy \
-  --config agentgate.yml \
-  --server github
-```
+1. **Scan** — classify each tool's risk (`read`, `write`, `send`, `delete`, `exec`) from its name and schema.
+2. **Taint** — when a tool result comes from an untrusted source or contains prompt-injection phrases, mark the session tainted.
+3. **Block** — once tainted, deny tool calls at or above the configured severity threshold.
+4. **Replay** — every decision is written to a redacted trace; `replay` re-evaluates traces against the current policy as a regression test.
 
-`examples/agentgate.yml` is for repo-local testing from this repository root. Production users should configure their actual MCP server command, args, cwd, and env under `servers` in `agentgate.yml`.
+This MVP uses newline-delimited JSON-RPC framing rather than the full MCP Content-Length framing.
 
-## Why it exists
+## Quick start: protect a real MCP server
 
-AI agents often read untrusted content before calling privileged tools. AgentGate gives local developers a narrow firewall for that boundary:
+1. Install AgentGate in your project:
+   ```bash
+   npm install -D @shooter-jp/agentgate
+   # or: pnpm add -D @shooter-jp/agentgate
+   ```
+2. Initialize a config (writes `agentgate.yml` and `.agentgate/traces/`):
+   ```bash
+   npx agentgate init
+   ```
+3. Edit `agentgate.yml`. Point `servers:` at the real MCP server command you want to protect:
+   ```yaml
+   servers:
+     github:
+       command: node
+       args: ["./node_modules/.bin/your-github-mcp-server"]
+   ```
+4. Check your setup:
+   ```bash
+   npx agentgate doctor
+   ```
+5. Register AgentGate as Codex's MCP server (it forwards to your real server):
+   ```bash
+   codex mcp add agentgate-github -- npx -y @shooter-jp/agentgate proxy \
+     --config agentgate.yml \
+     --server github
+   ```
+   For a repo-local source build, use the fixture under `examples/`:
+   ```bash
+   codex mcp add agentgate-github -- node dist/cli.js proxy \
+     --config examples/agentgate.yml \
+     --server github
+   ```
+6. In CI, replay accumulated traces to catch regressions:
+   ```bash
+   npx agentgate replay .agentgate/traces
+   ```
 
-- classify tool risk deterministically
-- taint a session after untrusted or suspicious tool output
-- block medium, high, and critical tool calls once tainted
-- write a redacted trace
-- replay the trace as a regression test
+The proxy pattern is not Codex-specific. It works with any MCP client that supports local STDIO servers.
 
-## Commands
+## Configuration
 
-```bash
-agentgate init
-agentgate scan [configOrToolsPath] [--json] [--fail-on high|critical]
-agentgate proxy --config agentgate.yml [--server github]
-agentgate replay <tracePathOrDir>
-agentgate demo github-injection
-agentgate doctor
-```
-
-## Config example
-
-`agentgate init` writes a neutral config with empty `servers` and no `tools_fixture`, so it is safe after npm publishing. The example below is the repo-local demo config from `examples/agentgate.yml`; run it from the repository root.
+`agentgate init` writes a neutral config (empty `servers`, no `tools_fixture`). The example below is the repo-local demo from [`examples/agentgate.yml`](examples/agentgate.yml):
 
 ```yaml
 project: agentgate-example
@@ -113,9 +151,33 @@ servers:
 tools_fixture: examples/tools/github-tools.json
 ```
 
-## Trace example
+| Key | Purpose |
+|---|---|
+| `project` | Label written into traces. |
+| `trace_dir` | Where redacted traces are written. Local-only. |
+| `untrusted_tools` | Glob patterns whose results taint the session. |
+| `policy.default` | Default action for tools without an explicit rule. |
+| `policy.tainted_block_threshold` | Severity at or above which blocking kicks in after taint (`low\|medium\|high\|critical`). |
+| `policy.tools` | Per-tool overrides (glob → action). |
+| `servers` | The downstream MCP servers AgentGate proxies. |
+| `tools_fixture` | *(optional)* Static tool inventory used by `scan` without launching the server. |
 
-Traces are written to `.agentgate/traces` by default and are never uploaded. Arguments are redacted before writing, and results are stored as hashes.
+More fixtures and a mock server live under [`examples/`](examples/).
+
+## Commands
+
+| Command | What it does | Key flags |
+|---|---|---|
+| `agentgate init` | Create `agentgate.yml` and `.agentgate/traces/`. | `--force` |
+| `agentgate scan [path]` | Classify tool risk from config or a fixture. | `--json`, `--fail-on high\|critical` |
+| `agentgate proxy` | Run the STDIO firewall proxy in front of an MCP server. | `--config <file>`, `--server <name>` |
+| `agentgate replay <pathOrDir>` | Re-evaluate traces against the current policy. | `--config <file>` |
+| `agentgate demo github-injection` | Run the credential-free injection demo. | — |
+| `agentgate doctor` | Check Node version, config, and trace directory. | `--config <file>` |
+
+## Trace format
+
+Traces are written to `.agentgate/traces` by default and are **never uploaded**. Arguments are redacted before writing; results are stored as hashes.
 
 ```json
 {
@@ -156,34 +218,57 @@ Traces are written to `.agentgate/traces` by default and are never uploaded. Arg
 
 ## Security model
 
-AgentGate uses conservative deterministic rules:
+Conservative, deterministic rules:
 
 - Sessions start untainted.
-- Tool results from configured untrusted tools taint the session.
-- Tool results containing suspicious prompt-injection text taint the session.
-- Once tainted, `block_when_tainted` blocks medium, high, and critical tool calls by default.
-- Set `policy.tainted_block_threshold` to tune that fail-closed threshold.
-- `require_approval` blocks in CI and non-interactive mode; in an interactive terminal it asks with default No.
-- Proxy mode always evaluates policy non-interactively, so stdout remains newline-delimited JSON-RPC only.
+- Results from configured `untrusted_tools` taint the session.
+- Results containing suspicious prompt-injection text taint the session.
+- Once tainted, `block_when_tainted` denies tool calls at or above `policy.tainted_block_threshold` (default `medium`).
+- `require_approval` blocks in CI and non-interactive mode; in an interactive terminal it asks with default **No**.
+- Proxy mode always evaluates policy non-interactively, so stdout remains JSON-RPC only.
 
-Suspicious text includes phrases such as `ignore previous instructions`, `system prompt`, `reveal secrets`, `exfiltrate`, `post to webhook`, `base64`, and `hidden instruction`.
+For vulnerability reporting, see [`SECURITY.md`](SECURITY.md).
 
-## Limitations
+<details>
+<summary>Suspicious phrases that trigger taint</summary>
 
-- AgentGate does not perform semantic influence tracking.
-- The first proxy implementation uses newline-delimited JSON-RPC, not MCP Content-Length framing.
-- JSON-RPC batch requests are not supported in the first proxy implementation.
-- Policy is local and file-based.
-- Trace files contain redacted arguments, evidence snippets, hashes, and decisions, not full tool results.
-- The demo server in `examples/mock-github-server.mjs` is a minimal MCP-compatible local fixture, not a production GitHub MCP server.
+`ignore previous instructions`, `system prompt`, `reveal secrets`, `exfiltrate`, `post to webhook`, `base64`, `hidden instruction`.
 
-## Roadmap
+</details>
 
-- MCP Content-Length framing support.
+## Limitations & Roadmap
+
+**Today's limitations**
+
+- No semantic influence tracking — taint is rule-based.
+- Newline-delimited JSON-RPC framing only; MCP Content-Length framing is not yet supported.
+- JSON-RPC batch requests are not supported in the proxy.
+- Policy is local and file-based; no central management.
+- Trace files store redacted arguments, evidence snippets, hashes, and decisions — not full tool results.
+- `examples/mock-github-server.mjs` is a test fixture, not a production GitHub MCP server.
+
+**Roadmap**
+
+- MCP Content-Length framing.
 - Broader fixture formats for common MCP servers.
-- More policy diagnostics in replay.
-- Optional generated regression test templates from traces.
+- More policy diagnostics in `replay`.
+- Optional generated regression-test templates from traces.
+
+## Development
+
+```bash
+pnpm install
+pnpm build
+pnpm test
+```
+
+Run the CLI from a source checkout:
+
+```bash
+node dist/cli.js demo github-injection
+node dist/cli.js replay .agentgate/traces
+```
 
 ## License
 
-Apache-2.0
+[Apache-2.0](LICENSE)
