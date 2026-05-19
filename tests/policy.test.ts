@@ -3,6 +3,8 @@ import { evaluatePolicy, resolvePolicyAction } from "../src/policy";
 import type { AgentGateConfig, ToolRisk, TrustState } from "../src/types";
 
 const risk: ToolRisk = { action: "write", severity: "high", matched_keywords: ["write"] };
+const lowRisk: ToolRisk = { action: "read", severity: "low", matched_keywords: ["read"] };
+const mediumRisk: ToolRisk = { action: "unknown", severity: "medium", matched_keywords: [] };
 const clean: TrustState = { tainted: false, sources: [] };
 const tainted: TrustState = {
   tainted: true,
@@ -16,6 +18,7 @@ function config(defaultAction: AgentGateConfig["policy"]["default"]): AgentGateC
     untrusted_tools: [],
     policy: {
       default: defaultAction,
+      tainted_block_threshold: "medium",
       tools: { "github.create_*": defaultAction }
     },
     servers: {}
@@ -29,7 +32,12 @@ describe("policy", () => {
 
   it("allows untainted high-risk calls under block_when_tainted", async () => {
     await expect(
-      evaluatePolicy({ tool: "github.write_file", risk, trust: clean, config: config("block_when_tainted") })
+      evaluatePolicy({
+        tool: "github.write_file",
+        risk,
+        trust: clean,
+        config: config("block_when_tainted")
+      })
     ).resolves.toMatchObject({ allowed: true });
   });
 
@@ -42,6 +50,54 @@ describe("policy", () => {
         config: config("block_when_tainted")
       })
     ).resolves.toMatchObject({ allowed: false });
+  });
+
+  it("blocks tainted medium-risk calls by default", async () => {
+    await expect(
+      evaluatePolicy({
+        tool: "repo.apply_patch",
+        risk: mediumRisk,
+        trust: tainted,
+        config: config("block_when_tainted")
+      })
+    ).resolves.toMatchObject({ allowed: false });
+  });
+
+  it("allows tainted low-risk calls by default", async () => {
+    await expect(
+      evaluatePolicy({
+        tool: "github.read_issue",
+        risk: lowRisk,
+        trust: tainted,
+        config: config("block_when_tainted")
+      })
+    ).resolves.toMatchObject({ allowed: true });
+  });
+
+  it("lets explicit allow override tainted threshold blocking", async () => {
+    const testConfig = config("block_when_tainted");
+    testConfig.policy.tools["repo.apply_patch"] = "allow";
+    await expect(
+      evaluatePolicy({
+        tool: "repo.apply_patch",
+        risk: mediumRisk,
+        trust: tainted,
+        config: testConfig
+      })
+    ).resolves.toMatchObject({ allowed: true });
+  });
+
+  it("supports custom tainted block thresholds", async () => {
+    const testConfig = config("block_when_tainted");
+    testConfig.policy.tainted_block_threshold = "high";
+    await expect(
+      evaluatePolicy({
+        tool: "repo.apply_patch",
+        risk: mediumRisk,
+        trust: tainted,
+        config: testConfig
+      })
+    ).resolves.toMatchObject({ allowed: true });
   });
 
   it("blocks require_approval in CI or non-interactive mode", async () => {

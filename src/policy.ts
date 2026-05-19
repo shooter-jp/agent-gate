@@ -45,7 +45,8 @@ export async function evaluatePolicy(input: PolicyEvaluationInput): Promise<Poli
     return evaluateApproval(input, policyAction);
   }
 
-  if (input.trust.tainted && severityAtLeast(input.risk.severity, "high")) {
+  const threshold = input.config.policy.tainted_block_threshold;
+  if (input.trust.tainted && severityAtLeast(input.risk.severity, threshold)) {
     return {
       policy_action: policyAction,
       allowed: false,

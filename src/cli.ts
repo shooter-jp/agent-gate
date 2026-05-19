@@ -9,13 +9,14 @@ import { runDoctor } from "./doctor";
 import { runProxy } from "./proxy";
 import { renderReplayResults, replayPath } from "./replay";
 import { loadToolsFromPath, renderToolTable } from "./tools";
+import { AGENTGATE_VERSION } from "./version";
 
 const program = new Command();
 
 program
   .name("agentgate")
   .description("The tool-call firewall for AI agents.")
-  .version("0.1.0");
+  .version(AGENTGATE_VERSION);
 
 program
   .command("init")
@@ -51,7 +52,8 @@ program
         console.log(renderToolTable(tools));
       }
 
-      if (options.failOn && tools.some((tool) => severityAtLeast(tool.risk.severity, options.failOn))) {
+      const failOn = options.failOn;
+      if (failOn && tools.some((tool) => severityAtLeast(tool.risk.severity, failOn))) {
         process.exitCode = 1;
       }
     }

@@ -4,12 +4,30 @@
   "description": "The tool-call firewall for AI agents.",
   "type": "module",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shooter-jp/agent-gate.git"
+  },
+  "homepage": "https://github.com/shooter-jp/agent-gate#readme",
+  "bugs": {
+    "url": "https://github.com/shooter-jp/agent-gate/issues"
+  },
+  "keywords": [
+    "mcp",
+    "ai-agents",
+    "agent-security",
+    "prompt-injection",
+    "tool-calls",
+    "ai-security",
+    "json-rpc"
+  ],
   "bin": {
     "agentgate": "dist/cli.js"
   },
   "files": [
     "dist",
     "README.md",
+    "SECURITY.md",
     "LICENSE"
   ],
   "engines": {
@@ -18,10 +36,11 @@
   "packageManager": "pnpm@10.14.0",
   "scripts": {
     "build": "tsup",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "check": "pnpm build && pnpm test && pnpm lint"
+    "check": "pnpm typecheck && pnpm build && pnpm test && pnpm lint"
   },
   "dependencies": {
     "commander": "14.0.3",
