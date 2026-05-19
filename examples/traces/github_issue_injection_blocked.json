@@ -6,6 +6,8 @@
   "ended_at": "2026-05-19T00:00:01.000Z",
   "events": [
     {
+      "type": "tool_call",
+      "request_kind": "request",
       "tool": "github.read_issue",
       "arguments": {
         "owner": "example",
@@ -48,6 +50,8 @@
       "result_hash": "sha256:example"
     },
     {
+      "type": "tool_call",
+      "request_kind": "request",
       "tool": "github.create_pull_request",
       "arguments": {
         "title": "Update workflow",
