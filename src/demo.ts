@@ -2,7 +2,7 @@ import path from "node:path";
 import { classifyTool } from "./classifier";
 import { exampleConfig } from "./config";
 import { evaluatePolicy } from "./policy";
-import { hashCanonicalValue, hashResult } from "./redaction";
+import { hashPolicyConfig, hashResult } from "./redaction";
 import { TraceWriter } from "./trace";
 import { createTrustState, updateTrustFromResult } from "./trust";
 import type { TraceEvent, TrustState } from "./types";
@@ -25,7 +25,7 @@ export async function runGithubInjectionDemo(cwd = process.cwd()): Promise<DemoR
     project: config.project,
     traceDir: config.trace_dir,
     server: "github",
-    policyHash: hashCanonicalValue(config.policy)
+    policyHash: hashPolicyConfig(config)
   });
   let trust: TrustState = createTrustState();
 

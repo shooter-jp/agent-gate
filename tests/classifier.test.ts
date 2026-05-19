@@ -83,6 +83,91 @@ describe("classifyTool", () => {
     });
   });
 
+  it("splits camelCase and PascalCase schema fields before matching", () => {
+    expect(
+      classifyTool({
+        name: "acme.perform",
+        inputSchema: {
+          type: "object",
+          properties: {
+            runCommand: { type: "string" }
+          }
+        }
+      })
+    ).toMatchObject({ action: "execute", severity: "critical" });
+
+    expect(
+      classifyTool({
+        name: "acme.deliver",
+        inputSchema: {
+          type: "object",
+          properties: {
+            externalUrl: { type: "string" }
+          }
+        }
+      })
+    ).toMatchObject({ action: "send", severity: "high" });
+
+    expect(
+      classifyTool({
+        name: "acme.query",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sqlQuery: { type: "string" }
+          }
+        }
+      })
+    ).toMatchObject({ action: "database", severity: "critical" });
+
+    expect(
+      classifyTool({
+        name: "acme.prepare",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pullRequest: { type: "string" }
+          }
+        }
+      })
+    ).toMatchObject({ action: "write", severity: "high" });
+
+    expect(
+      classifyTool({
+        name: "acme.notify",
+        inputSchema: {
+          type: "object",
+          properties: {
+            recipientEmail: { type: "string" }
+          }
+        }
+      })
+    ).toMatchObject({ action: "send", severity: "high" });
+  });
+
+  it("does not treat bare post nouns as send indicators", () => {
+    expect(classifyTool("blog.get_post")).toMatchObject({
+      action: "read",
+      severity: "low"
+    });
+    expect(classifyTool("forum.search_posts")).toMatchObject({
+      action: "read",
+      severity: "low"
+    });
+    expect(classifyTool("slack.post_message")).toMatchObject({
+      action: "send",
+      severity: "high"
+    });
+    expect(classifyTool("social.post")).toMatchObject({
+      action: "send",
+      severity: "high"
+    });
+    expect(classifyTool("twitter.post_tweet")).toMatchObject({
+      action: "send",
+      severity: "high"
+    });
+  });
+
   it("does not treat pagination schema fields as browser indicators", () => {
     expect(
       classifyTool({
