@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { exampleConfig } from "../src/config";
 import { runGithubInjectionDemo } from "../src/demo";
+import { hashPolicyConfig } from "../src/redaction";
 import { renderReplayResults, replayTrace } from "../src/replay";
 import { TraceWriter } from "../src/trace";
 import type { TraceFile, TraceToolCallEvent } from "../src/types";
@@ -229,6 +230,60 @@ describe("replay", () => {
     const result = await replayTrace(trace, "trace.json", exampleConfig);
     expect(result.passed).toBe(true);
     expect(renderReplayResults([result])).toContain("Policy original=sha256:original");
+  });
+
+  it("includes untrusted tools in current replay policy hashes", async () => {
+    const trace: TraceFile = {
+      trace_id: "test",
+      schema_version: "1.0",
+      project: "test",
+      policy_hash: hashPolicyConfig(exampleConfig),
+      started_at: new Date().toISOString(),
+      ended_at: new Date().toISOString(),
+      events: []
+    };
+    const changedUntrustedTools = {
+      ...exampleConfig,
+      untrusted_tools: ["docs.read_*"]
+    };
+    const original = await replayTrace(trace, "trace.json", exampleConfig);
+    const changed = await replayTrace(trace, "trace.json", changedUntrustedTools);
+
+    expect(original.currentPolicyHash).toBe(hashPolicyConfig(exampleConfig));
+    expect(changed.currentPolicyHash).toBe(hashPolicyConfig(changedUntrustedTools));
+    expect(original.currentPolicyHash).not.toBe(changed.currentPolicyHash);
+  });
+
+  it("replays blocked tool call notifications as transport blocks", async () => {
+    const trace: TraceFile = {
+      trace_id: "test",
+      schema_version: "1.0",
+      project: "test",
+      started_at: new Date().toISOString(),
+      ended_at: new Date().toISOString(),
+      events: [
+        event({
+          request_kind: "notification",
+          tool: "github.read_issue",
+          risk: { action: "read", severity: "low", matched_keywords: ["read"] },
+          trust: { before: cleanTrust, after: cleanTrust },
+          decision: {
+            policy_action: "block",
+            allowed: false,
+            reason: "tools/call notifications are blocked because their results cannot be audited"
+          },
+          reason: "tools/call notifications are blocked because their results cannot be audited",
+          expected_decision: "blocked"
+        })
+      ]
+    };
+
+    await expect(
+      replayTrace(trace, "trace.json", {
+        ...exampleConfig,
+        policy: { default: "allow", tainted_block_threshold: "medium", tools: {} }
+      })
+    ).resolves.toMatchObject({ passed: true });
   });
 });
 

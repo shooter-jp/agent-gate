@@ -1,25 +1,31 @@
 name: CI
 
 on:
-  push:
   pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
 
 jobs:
-  build-test:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-      - uses: pnpm/action-setup@v5
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
         with:
           version: 10.14.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm build
-      - run: pnpm test
-      - run: pnpm lint
+      - run: pnpm check
       - run: node dist/cli.js demo github-injection
       - run: node dist/cli.js scan examples/tools/github-tools.json
       - run: node dist/cli.js replay .agentgate/traces

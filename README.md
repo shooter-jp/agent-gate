@@ -147,9 +147,10 @@ Suspicious text includes phrases such as `ignore previous instructions`, `system
 
 - AgentGate does not perform semantic influence tracking.
 - The first proxy implementation uses newline-delimited JSON-RPC, not MCP Content-Length framing.
+- JSON-RPC batch requests are not supported in the first proxy implementation.
 - Policy is local and file-based.
 - Trace files contain redacted arguments, evidence snippets, hashes, and decisions, not full tool results.
-- The demo server in `examples/mock-github-server.mjs` is local-only and non-production.
+- The demo server in `examples/mock-github-server.mjs` is a minimal MCP-compatible local fixture, not a production GitHub MCP server.
 
 ## Roadmap
 

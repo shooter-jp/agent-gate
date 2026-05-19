@@ -29,6 +29,30 @@ rl.on("line", (line) => {
   if (!line.trim()) return;
   const request = JSON.parse(line);
 
+  if (request.method === "initialize") {
+    respond({
+      jsonrpc: "2.0",
+      id: request.id,
+      result: {
+        protocolVersion: request.params?.protocolVersion ?? "2025-11-25",
+        capabilities: {
+          tools: {
+            listChanged: true
+          }
+        },
+        serverInfo: {
+          name: "agentgate-mock-github",
+          version: "0.1.0"
+        }
+      }
+    });
+    return;
+  }
+
+  if (request.method === "notifications/initialized") {
+    return;
+  }
+
   if (request.method === "tools/list") {
     respond({ jsonrpc: "2.0", id: request.id, result: { tools } });
     return;
