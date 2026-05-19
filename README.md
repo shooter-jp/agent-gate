@@ -29,26 +29,48 @@ Skip AgentGate if your agent only uses read-only tools or you manually approve e
 ## Requirements
 
 - Node.js **≥ 20**
-- npm or pnpm
-- *(optional)* [Codex](https://github.com/openai/codex) or any MCP-compatible client
+- pnpm **10.x** for source development
+- npm or pnpm for published package usage
+- _(optional)_ [Codex](https://github.com/openai/codex) or any MCP-compatible client
 
-## Try it in 30 seconds
+## Which command should I run?
+
+AgentGate is not published to npm yet. If you are reading this from a source checkout, build it and run the CLI with `node dist/cli.js`.
+
+```bash
+pnpm install
+pnpm build
+node dist/cli.js demo github-injection
+```
+
+After the package is published, the same command will be:
+
+```bash
+npx -y @shooter-jp/agentgate demo github-injection
+```
+
+Avoid `npx agentgate` unless `@shooter-jp/agentgate` is already installed in the current project. The package name is scoped, so an unscoped `npx agentgate` can resolve the wrong package.
+
+## Try the demo
 
 The demo simulates a GitHub issue containing prompt-injection text, marks the session tainted, blocks a privileged write, and writes a redacted trace. No credentials, no real GitHub access.
 
-**From source (works today):**
+From this repository:
+
+```bash
+pnpm install
+pnpm build
+node dist/cli.js demo github-injection
+```
+
+If you have not cloned the repository yet:
 
 ```bash
 git clone https://github.com/shooter-jp/agent-gate.git
 cd agent-gate
-pnpm install && pnpm build
+pnpm install
+pnpm build
 node dist/cli.js demo github-injection
-```
-
-**From npm (coming soon — once published):**
-
-```bash
-npx -y @shooter-jp/agentgate demo github-injection
 ```
 
 Expected output:
@@ -68,10 +90,12 @@ policy:
 Replay the trace as a regression test:
 
 ```bash
-# Source checkout
 node dist/cli.js replay .agentgate/traces
+```
 
-# npm package
+Published package command, once available:
+
+```bash
 npx -y @shooter-jp/agentgate replay .agentgate/traces
 ```
 
@@ -88,7 +112,45 @@ AgentGate runs as a local STDIO JSON-RPC proxy between an MCP client and an MCP 
 
 This MVP uses newline-delimited JSON-RPC framing rather than the full MCP Content-Length framing.
 
-## Quick start: protect a real MCP server
+## Protect a real MCP server
+
+Use this flow when you have an existing MCP server and want AgentGate to sit in front of it.
+
+### From source today
+
+1. Build AgentGate:
+   ```bash
+   pnpm install
+   pnpm build
+   ```
+2. Initialize a config in the project you want to protect:
+   ```bash
+   node /absolute/path/to/agent-gate/dist/cli.js init
+   ```
+3. Edit `agentgate.yml`. Point `servers:` at the real MCP server command you want to protect:
+   ```yaml
+   servers:
+     github:
+       command: node
+       args: ["./node_modules/.bin/your-github-mcp-server"]
+   ```
+4. Check your setup:
+   ```bash
+   node /absolute/path/to/agent-gate/dist/cli.js doctor --config agentgate.yml
+   ```
+5. Register AgentGate as Codex's MCP server. AgentGate forwards to the real server:
+   ```bash
+   codex mcp add agentgate-github -- node /absolute/path/to/agent-gate/dist/cli.js proxy \
+     --config /absolute/path/to/your/project/agentgate.yml \
+     --server github
+   ```
+6. Replay accumulated traces in CI:
+   ```bash
+   node /absolute/path/to/agent-gate/dist/cli.js replay .agentgate/traces \
+     --config agentgate.yml
+   ```
+
+### From npm after publish
 
 1. Install AgentGate in your project:
    ```bash
@@ -98,6 +160,7 @@ This MVP uses newline-delimited JSON-RPC framing rather than the full MCP Conten
 2. Initialize a config (writes `agentgate.yml` and `.agentgate/traces/`):
    ```bash
    npx agentgate init
+   # or: pnpm exec agentgate init
    ```
 3. Edit `agentgate.yml`. Point `servers:` at the real MCP server command you want to protect:
    ```yaml
@@ -109,22 +172,18 @@ This MVP uses newline-delimited JSON-RPC framing rather than the full MCP Conten
 4. Check your setup:
    ```bash
    npx agentgate doctor
+   # or: pnpm exec agentgate doctor
    ```
 5. Register AgentGate as Codex's MCP server (it forwards to your real server):
    ```bash
-   codex mcp add agentgate-github -- npx -y @shooter-jp/agentgate proxy \
+   codex mcp add agentgate-github -- npx agentgate proxy \
      --config agentgate.yml \
-     --server github
-   ```
-   For a repo-local source build, use the fixture under `examples/`:
-   ```bash
-   codex mcp add agentgate-github -- node dist/cli.js proxy \
-     --config examples/agentgate.yml \
      --server github
    ```
 6. In CI, replay accumulated traces to catch regressions:
    ```bash
    npx agentgate replay .agentgate/traces
+   # or: pnpm exec agentgate replay .agentgate/traces
    ```
 
 The proxy pattern is not Codex-specific. It works with any MCP client that supports local STDIO servers.
@@ -151,29 +210,31 @@ servers:
 tools_fixture: examples/tools/github-tools.json
 ```
 
-| Key | Purpose |
-|---|---|
-| `project` | Label written into traces. |
-| `trace_dir` | Where redacted traces are written. Local-only. |
-| `untrusted_tools` | Glob patterns whose results taint the session. |
-| `policy.default` | Default action for tools without an explicit rule. |
+| Key                              | Purpose                                                                                   |
+| -------------------------------- | ----------------------------------------------------------------------------------------- |
+| `project`                        | Label written into traces.                                                                |
+| `trace_dir`                      | Where redacted traces are written. Local-only.                                            |
+| `untrusted_tools`                | Glob patterns whose results taint the session.                                            |
+| `policy.default`                 | Default action for tools without an explicit rule.                                        |
 | `policy.tainted_block_threshold` | Severity at or above which blocking kicks in after taint (`low\|medium\|high\|critical`). |
-| `policy.tools` | Per-tool overrides (glob → action). |
-| `servers` | The downstream MCP servers AgentGate proxies. |
-| `tools_fixture` | *(optional)* Static tool inventory used by `scan` without launching the server. |
+| `policy.tools`                   | Per-tool overrides (glob → action).                                                       |
+| `servers`                        | The downstream MCP servers AgentGate proxies.                                             |
+| `tools_fixture`                  | _(optional)_ Static tool inventory used by `scan` without launching the server.           |
 
 More fixtures and a mock server live under [`examples/`](examples/).
 
 ## Commands
 
-| Command | What it does | Key flags |
-|---|---|---|
-| `agentgate init` | Create `agentgate.yml` and `.agentgate/traces/`. | `--force` |
-| `agentgate scan [path]` | Classify tool risk from config or a fixture. | `--json`, `--fail-on high\|critical` |
-| `agentgate proxy` | Run the STDIO firewall proxy in front of an MCP server. | `--config <file>`, `--server <name>` |
-| `agentgate replay <pathOrDir>` | Re-evaluate traces against the current policy. | `--config <file>` |
-| `agentgate demo github-injection` | Run the credential-free injection demo. | — |
-| `agentgate doctor` | Check Node version, config, and trace directory. | `--config <file>` |
+The table uses the installed binary name, `agentgate`. In this source checkout today, replace `agentgate` with `node dist/cli.js`.
+
+| Command                           | What it does                                            | Key flags                            |
+| --------------------------------- | ------------------------------------------------------- | ------------------------------------ |
+| `agentgate init`                  | Create `agentgate.yml` and `.agentgate/traces/`.        | `--force`                            |
+| `agentgate scan [path]`           | Classify tool risk from config or a fixture.            | `--json`, `--fail-on high\|critical` |
+| `agentgate proxy`                 | Run the STDIO firewall proxy in front of an MCP server. | `--config <file>`, `--server <name>` |
+| `agentgate replay <pathOrDir>`    | Re-evaluate traces against the current policy.          | `--config <file>`                    |
+| `agentgate demo github-injection` | Run the credential-free injection demo.                 | —                                    |
+| `agentgate doctor`                | Check Node version, config, and trace directory.        | `--config <file>`                    |
 
 ## Trace format
 
