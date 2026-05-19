@@ -30,4 +30,96 @@ describe("classifyTool", () => {
       matched_keywords: []
     });
   });
+
+  it("uses inputSchema when classifying send tools", () => {
+    expect(
+      classifyTool({
+        name: "acme.deliver",
+        inputSchema: {
+          type: "object",
+          properties: {
+            recipient: { type: "string" },
+            body: { type: "string" }
+          }
+        }
+      })
+    ).toMatchObject({
+      action: "send",
+      severity: "high"
+    });
+  });
+
+  it("uses inputSchema when classifying write tools", () => {
+    expect(
+      classifyTool({
+        name: "acme.prepare",
+        inputSchema: {
+          type: "object",
+          properties: {
+            commit_message: { type: "string" }
+          }
+        }
+      })
+    ).toMatchObject({
+      action: "write",
+      severity: "high"
+    });
+  });
+
+  it("uses inputSchema when classifying execute tools", () => {
+    expect(
+      classifyTool({
+        name: "acme.perform",
+        inputSchema: {
+          type: "object",
+          properties: {
+            command: { type: "string" }
+          }
+        }
+      })
+    ).toMatchObject({
+      action: "execute",
+      severity: "critical"
+    });
+  });
+
+  it("does not treat pagination schema fields as browser indicators", () => {
+    expect(
+      classifyTool({
+        name: "github.search_issues",
+        description: "Search GitHub issues.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            page: { type: "number" },
+            page_size: { type: "number" },
+            query: { type: "string" }
+          }
+        }
+      })
+    ).toMatchObject({
+      action: "read",
+      severity: "low"
+    });
+  });
+
+  it("does not treat service nouns as send indicators", () => {
+    expect(classifyTool("slack.search_messages")).toMatchObject({
+      action: "read",
+      severity: "low"
+    });
+    expect(classifyTool("gmail.search_email")).toMatchObject({
+      action: "read",
+      severity: "low"
+    });
+  });
+
+  it("does not treat returned content body as a send indicator", () => {
+    expect(
+      classifyTool("github.read_issue", "Read a GitHub issue and return the issue body.")
+    ).toMatchObject({
+      action: "read",
+      severity: "low"
+    });
+  });
 });
