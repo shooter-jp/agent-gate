@@ -45,6 +45,7 @@ export async function runGithubInjectionDemo(cwd = process.cwd()): Promise<DemoR
   trust = readTrust.after;
   await writer.record({
     type: "tool_call",
+    request_kind: "request",
     tool: readTool,
     arguments: readArgs,
     risk: readRisk,
@@ -71,6 +72,7 @@ export async function runGithubInjectionDemo(cwd = process.cwd()): Promise<DemoR
   });
   const writeEvent: TraceEvent = {
     type: "tool_call",
+    request_kind: "request",
     tool: writeTool,
     arguments: writeArgs,
     risk: writeRisk,

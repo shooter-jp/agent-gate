@@ -112,6 +112,12 @@ describe("JsonRpcProxy", () => {
       result: { isError: true }
     });
     expect(harness.upstreamInput.lines()).toEqual([]);
+    const trace = await readOnlyTrace(harness.traceDir);
+    expect(trace.events[0]).toMatchObject({
+      type: "tool_call",
+      request_kind: "request",
+      expected_decision: "blocked"
+    });
 
     await harness.close();
   });
@@ -128,6 +134,94 @@ describe("JsonRpcProxy", () => {
 
     await first.close();
     await second.close();
+  });
+
+  it("records request_kind request for allowed normal tool calls", async () => {
+    const harness = await startHarness();
+    harness.clientInput.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "github.read_issue", arguments: { issue_number: 1 } }
+      })}\n`
+    );
+
+    expect(JSON.parse(await harness.upstreamInput.nextLine())).toMatchObject({
+      id: 1,
+      method: "tools/call"
+    });
+    harness.upstream.stdout.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        result: {
+          content: [{ type: "text", text: "Issue body" }]
+        }
+      })}\n`
+    );
+    expect(JSON.parse(await harness.clientOutput.nextLine())).toMatchObject({
+      id: 1,
+      result: {
+        content: [{ type: "text", text: "Issue body" }]
+      }
+    });
+
+    await waitForTraceEvent(harness.traceDir, "tool_call");
+    const trace = await readOnlyTrace(harness.traceDir);
+    expect(trace.events[0]).toMatchObject({
+      type: "tool_call",
+      request_kind: "request",
+      tool: "github.read_issue",
+      result_hash: expect.stringMatching(/^sha256:/),
+      expected_decision: "allowed"
+    });
+
+    await harness.close();
+  });
+
+  it("propagates upstream exit codes after finalizing the trace", async () => {
+    const harness = await startHarness();
+
+    harness.upstream.emit("exit", 7, null);
+
+    await waitFor(() => {
+      expect(harness.exit).toHaveBeenCalledWith(7);
+    });
+    const trace = await readOnlyTrace(harness.traceDir);
+    expect(trace.ended_at).toEqual(expect.any(String));
+
+    await harness.close();
+  });
+
+  it("settles pending requests when upstream exits", async () => {
+    const harness = await startHarness();
+    harness.clientInput.write(
+      `${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} })}\n`
+    );
+
+    expect(JSON.parse(await harness.upstreamInput.nextLine())).toMatchObject({
+      id: 1,
+      method: "tools/list"
+    });
+    harness.upstream.emit("exit", 7, null);
+
+    await waitFor(() => {
+      expect(harness.exit).toHaveBeenCalledWith(7);
+    });
+    await harness.close();
+  });
+
+  it("maps upstream signal exits to non-zero exit codes", async () => {
+    const harness = await startHarness();
+
+    harness.upstream.emit("exit", null, "SIGTERM");
+
+    await waitFor(() => {
+      expect(harness.exit).toHaveBeenCalledWith(143);
+    });
+
+    await harness.close();
   });
 
   it("merges paginated tools/list inventory and invalidates on list_changed", async () => {
@@ -227,6 +321,7 @@ async function startHarness(configOverrides: Partial<AgentGateConfig> = {}) {
   const errorOutput = new PassThrough();
   const clientOutput = lineReader(clientOutputStream);
   const upstreamInput = lineReader(upstream.stdin);
+  const exit = vi.fn();
   const baseConfig: AgentGateConfig = {
     project: "proxy-test",
     trace_dir: traceDir,
@@ -252,7 +347,7 @@ async function startHarness(configOverrides: Partial<AgentGateConfig> = {}) {
     clientInput,
     clientOutput: clientOutputStream,
     errorOutput,
-    exit: vi.fn()
+    exit
   });
   const running = proxy.start();
   await waitForTraceFile(traceDir);
@@ -264,6 +359,7 @@ async function startHarness(configOverrides: Partial<AgentGateConfig> = {}) {
     clientInput,
     clientOutput,
     upstreamInput,
+    exit,
     config,
     async close() {
       clientInput.end();
@@ -364,4 +460,18 @@ async function waitForTraceEvent(traceDir: string, eventType: string): Promise<v
 
 function waitForSettled(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 10));
+}
+
+async function waitFor(assertion: () => void): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    try {
+      assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+    await waitForSettled();
+  }
+  throw lastError instanceof Error ? lastError : new Error("Timed out waiting for assertion");
 }

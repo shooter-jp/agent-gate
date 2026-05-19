@@ -295,6 +295,8 @@ describe("demo", () => {
     expect(result.output).toContain("BLOCKED");
     const trace = JSON.parse(await readFile(result.tracePath, "utf8")) as TraceFile;
     expect(trace.events).toHaveLength(2);
+    expect((trace.events[0] as TraceToolCallEvent | undefined)?.request_kind).toBe("request");
+    expect((trace.events[1] as TraceToolCallEvent | undefined)?.request_kind).toBe("request");
     expect((trace.events[1] as TraceToolCallEvent | undefined)?.decision.allowed).toBe(false);
   });
 });
