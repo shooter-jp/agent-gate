@@ -6,6 +6,7 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { JsonRpcProxy } from "../src/proxy";
+import { hashPolicyConfig } from "../src/redaction";
 import type { AgentGateConfig, LoadedConfig, TraceFile } from "../src/types";
 
 const tempDirs: string[] = [];
@@ -58,6 +59,37 @@ describe("JsonRpcProxy", () => {
     await harness.close();
   });
 
+  it("blocks tools/call notifications without forwarding or responding", async () => {
+    const harness = await startHarness();
+    harness.clientInput.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { name: "github.read_issue", arguments: { issue_number: 1 } }
+      })}\n`
+    );
+
+    await waitForTraceEvent(harness.traceDir, "tool_call");
+    await waitForSettled();
+    expect(harness.upstreamInput.lines()).toEqual([]);
+    expect(harness.clientOutput.lines()).toEqual([]);
+
+    const trace = await readOnlyTrace(harness.traceDir);
+    expect(trace.events[0]).toMatchObject({
+      type: "tool_call",
+      request_kind: "notification",
+      tool: "github.read_issue",
+      decision: {
+        policy_action: "block",
+        allowed: false
+      },
+      result_hash: null,
+      expected_decision: "blocked"
+    });
+
+    await harness.close();
+  });
+
   it("keeps proxy stdout JSON-RPC-only when approval would be required", async () => {
     const harness = await startHarness({
       policy: { default: "require_approval", tainted_block_threshold: "medium", tools: {} }
@@ -82,6 +114,20 @@ describe("JsonRpcProxy", () => {
     expect(harness.upstreamInput.lines()).toEqual([]);
 
     await harness.close();
+  });
+
+  it("includes untrusted tools in the trace policy hash", async () => {
+    const first = await startHarness();
+    const second = await startHarness({ untrusted_tools: ["docs.read_*"] });
+
+    const firstTrace = await readOnlyTrace(first.traceDir);
+    const secondTrace = await readOnlyTrace(second.traceDir);
+    expect(firstTrace.policy_hash).toBe(hashPolicyConfig(first.config));
+    expect(secondTrace.policy_hash).toBe(hashPolicyConfig(second.config));
+    expect(firstTrace.policy_hash).not.toBe(secondTrace.policy_hash);
+
+    await first.close();
+    await second.close();
   });
 
   it("merges paginated tools/list inventory and invalidates on list_changed", async () => {
@@ -218,6 +264,7 @@ async function startHarness(configOverrides: Partial<AgentGateConfig> = {}) {
     clientInput,
     clientOutput,
     upstreamInput,
+    config,
     async close() {
       clientInput.end();
       await running;

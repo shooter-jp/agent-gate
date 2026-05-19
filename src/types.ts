@@ -84,6 +84,7 @@ export type ExpectedDecision = "allowed" | "blocked";
 
 export interface TraceToolCallEvent {
   type?: "tool_call";
+  request_kind?: "request" | "notification";
   tool: string;
   arguments: unknown;
   risk: ToolRisk;

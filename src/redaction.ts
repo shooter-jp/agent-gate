@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { AgentGateConfig } from "./types";
 
 const secretKeyPattern =
   /(?:api[_-]?key|token|secret|password|passwd|authorization|auth|credential|private[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|session[_-]?cookie|cookie)/i;
@@ -51,6 +52,15 @@ export function hashResult(value: unknown): string {
 export function hashCanonicalValue(value: unknown): string {
   const digest = createHash("sha256").update(canonicalJson(value)).digest("hex");
   return `sha256:${digest}`;
+}
+
+export function hashPolicyConfig(
+  config: Pick<AgentGateConfig, "policy" | "untrusted_tools">
+): string {
+  return hashCanonicalValue({
+    policy: config.policy,
+    untrusted_tools: config.untrusted_tools
+  });
 }
 
 export function redactedExcerpt(value: unknown, maxLength = 240): string {

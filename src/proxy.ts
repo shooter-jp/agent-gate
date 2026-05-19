@@ -3,7 +3,7 @@ import readline from "node:readline";
 import { classifyTool } from "./classifier";
 import { loadConfig, resolveRelative } from "./config";
 import { evaluatePolicy } from "./policy";
-import { hashCanonicalValue, hashResult } from "./redaction";
+import { hashCanonicalValue, hashPolicyConfig, hashResult } from "./redaction";
 import { TraceWriter } from "./trace";
 import { createTrustState, updateTrustFromResult } from "./trust";
 import type { AgentGateConfig, LoadedConfig, ToolDefinition, ToolRisk, TrustState } from "./types";
@@ -84,7 +84,7 @@ export class JsonRpcProxy {
       project: this.loaded.config.project,
       traceDir,
       server: this.serverName,
-      policyHash: hashCanonicalValue(this.loaded.config.policy)
+      policyHash: hashPolicyConfig(this.loaded.config)
     });
 
     this.upstream.stderr.on("data", (chunk) => {
@@ -206,6 +206,34 @@ export class JsonRpcProxy {
     const args = params.arguments ?? {};
     const risk = this.toolRisk.get(tool) ?? classifyTool(tool);
     const trustBefore = this.trust;
+    const tool_schema_hash = this.toolSchemas.has(tool)
+      ? hashCanonicalValue(this.toolSchemas.get(tool))
+      : undefined;
+
+    if (isNotification(request)) {
+      const reason =
+        "tools/call notifications are blocked because their results cannot be audited";
+      await this.writer?.record({
+        type: "tool_call",
+        request_kind: "notification",
+        tool,
+        arguments: args,
+        risk,
+        trust: { before: trustBefore, after: trustBefore },
+        decision: {
+          policy_action: "block",
+          allowed: false,
+          reason
+        },
+        reason,
+        evidence: trustBefore.sources.map((source) => source.evidence).join(" | "),
+        result_hash: null,
+        tool_schema_hash,
+        expected_decision: "blocked"
+      });
+      return;
+    }
+
     const decision = await evaluatePolicy({
       tool,
       risk,
@@ -213,9 +241,6 @@ export class JsonRpcProxy {
       config: this.loaded.config,
       nonInteractive: true
     });
-    const tool_schema_hash = this.toolSchemas.has(tool)
-      ? hashCanonicalValue(this.toolSchemas.get(tool))
-      : undefined;
 
     if (!decision.allowed) {
       await this.writer?.record({

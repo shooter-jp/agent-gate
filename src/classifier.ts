@@ -41,6 +41,7 @@ const keywordGroups: KeywordGroup[] = [
       "send email",
       "post",
       "post message",
+      "post_message",
       "publish",
       "publish message",
       "webhook",
@@ -91,11 +92,15 @@ const keywordGroups: KeywordGroup[] = [
 const schemaKeywordGroups: KeywordGroup[] = keywordGroups.map((group) =>
   group.action === "browser"
     ? { ...group, keywords: group.keywords.filter((keyword) => keyword !== "page") }
+    : group.action === "send"
+      ? { ...group, keywords: group.keywords.filter((keyword) => keyword !== "post") }
     : group
 );
 
 function normalize(input: string): string {
   return input
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
     .toLowerCase()
     .replace(/[_./:-]+/g, " ")
     .replace(/[^a-z0-9]+/g, " ")
@@ -145,7 +150,10 @@ function findBestMatch(
   let best: { group: KeywordGroup; matched: string[]; longest: number } | undefined;
 
   for (const group of groups) {
-    const matched = group.keywords.filter((keyword) => hasPhrase(normalizedText, keyword));
+    const matched = group.keywords.filter((keyword) => {
+      if (keyword === "post" && isReadPostNoun(normalizedText)) return false;
+      return hasPhrase(normalizedText, keyword);
+    });
     if (matched.length === 0) continue;
     const longest = Math.max(...matched.map((keyword) => normalize(keyword).length));
     if (!best) {
@@ -160,6 +168,10 @@ function findBestMatch(
   }
 
   return best;
+}
+
+function isReadPostNoun(normalizedText: string): boolean {
+  return /\b(?:get|read|search|list|fetch|retrieve|view)\s+posts?\b/.test(normalizedText);
 }
 
 function chooseBestMatch(
