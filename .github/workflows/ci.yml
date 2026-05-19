@@ -16,8 +16,10 @@ jobs:
         with:
           version: 10.14.0
       - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
       - run: pnpm build
       - run: pnpm test
+      - run: pnpm lint
       - run: node dist/cli.js demo github-injection
       - run: node dist/cli.js scan examples/tools/github-tools.json
       - run: node dist/cli.js replay .agentgate/traces
