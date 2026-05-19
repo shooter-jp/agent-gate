@@ -1,0 +1,14 @@
+project: agentgate-example
+trace_dir: .agentgate/traces
+untrusted_tools:
+  - github.read_*
+policy:
+  default: block_when_tainted
+  tools:
+    github.create_*: block_when_tainted
+    github.write_*: block_when_tainted
+servers:
+  github:
+    command: node
+    args: ["examples/mock-github-server.mjs"]
+tools_fixture: examples/tools/github-tools.json
